@@ -1,4 +1,5 @@
-import faiss
+import faiss    
+import os
 from langchain_community.docstore.in_memory import InMemoryDocstore
 import streamlit as st
 from dotenv import load_dotenv
@@ -61,9 +62,10 @@ def get_vectorStore(text_chunks):
 from langchain.memory import ConversationBufferMemory
 
 def get_conversationChain(vectoreStore):
+    load_dotenv()
     model = ChatGroq(
         model="llama3-8b-8192",
-        api_key="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"
+        api_key=os.getenv('GROQ_API_KEY')
     )
     
     memory = ConversationBufferMemory(
