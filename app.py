@@ -1,4 +1,3 @@
-import faiss    
 import os
 from langchain_community.docstore.in_memory import InMemoryDocstore
 import streamlit as st
@@ -30,9 +29,12 @@ def get_pdf_text(pdf_docs):
     # Load the PDF file
     text = ""
     for pdf in pdf_docs:
-        pdf_reader = PdfReader(pdf)
-        for page in pdf_reader.pages:
-            text += page.extract_text()
+        try:
+            pdf_reader = PdfReader(pdf)
+            for page in pdf_reader.pages:
+                text += page.extract_text() or ""  # Handle None return from extract_text
+        except Exception as e:
+            st.error(f"Error reading {pdf.name}: {e}")
     return text
 
 def get_text_chunks(raw_text):
@@ -59,8 +61,6 @@ def get_vectorStore(text_chunks):
     vectorStore = FAISS.from_texts(text_chunks, embedding_model)
     return vectorStore
 
-from langchain.memory import ConversationBufferMemory
-
 def get_conversationChain(vectoreStore):
     load_dotenv()
     model = ChatGroq(
@@ -70,7 +70,8 @@ def get_conversationChain(vectoreStore):
     
     memory = ConversationBufferMemory(
         memory_key="chat_history",
-        return_messages=True
+        return_messages=True,
+        max_memory=5  # Adjust as needed
     )
     
     conversation_chain = ConversationalRetrievalChain.from_llm(
@@ -85,54 +86,66 @@ def handle_userinput(user_question):
         st.error("Please upload and process PDFs before asking questions.")
         return
     
-    response = st.session_state.conversation({'question': user_question})
+    try:
+        response = st.session_state.conversation({'question': user_question})
+    except Exception as e:
+        st.error(f"Error during conversation: {e}")
+        return
     
     for i, message in enumerate(response['chat_history']):
         if i % 2 == 0:
-            st.write(user_template.replace(
-                "{{MSG}}", message.content), unsafe_allow_html=True)
+            st.write(user_template.replace("{{MSG}}", message.content), unsafe_allow_html=True)
         else:
-            st.write(bot_template.replace(
-                "{{MSG}}", message.content), unsafe_allow_html=True)
+            st.write(bot_template.replace("{{MSG}}", message.content), unsafe_allow_html=True)
+
 
 def main():
     load_dotenv()
    
-    st.set_page_config(page_title="Chat With Multiple PDF",page_icon=":books:")
+    st.set_page_config(page_title="Chat With Multiple PDF", page_icon=":books:")
     if "conversation" not in st.session_state:
         st.session_state.conversation = None
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []    
-
+    
     st.write(css, unsafe_allow_html=True)
-    st.header("Chat with multiple PDFs :books:")
-    user_question = st.text_input("Ask a question about your documents:")
+    st.title("Chat with multiple PDFs :books:")
+    user_question = st.chat_input("Ask a question about your documents:")
     if user_question:
         handle_userinput(user_question)
 
     with st.sidebar:
         st.subheader("Your Documents")
-        pdf_docs = st.file_uploader("Upload Your PDFs Here and process",accept_multiple_files=True)
+        pdf_docs = st.file_uploader("Upload Your PDFs Here and process", accept_multiple_files=True)
+        
+        if pdf_docs:
+            st.success(f"Uploaded {len(pdf_docs)} PDF(s).")
+        else:
+            st.warning("Please upload at least one PDF before processing.")
+        
         if st.button("process"):
-            with st.spinner("Processing"):
+            # Check if PDFs are uploaded
+            if not pdf_docs:
+                st.error("No PDFs uploaded! Please upload PDFs before processing.")
+                return  # Exit the processing
 
-                # Process the uploaded PDFs here
-                # 1.Get PDF text
+            with st.spinner("Processing..."):
+                # Get PDF text
                 raw_text = get_pdf_text(pdf_docs)
-               
-                # 2. Get the Text chunks
+                if not raw_text.strip():
+                    st.error("No text was extracted from the PDFs. Please check the PDFs.")
+                    return
+                
+                # Get the Text chunks
                 text_chunks = get_text_chunks(raw_text)
-                # st.write(text_chunks)
-                # 3. Create vector Store
+                if not text_chunks:
+                    st.error("No text chunks were created from the PDF. Please check the PDF content.")
+                    return
+                
+                # Create vector Store
                 vector_store = get_vectorStore(text_chunks)
-                # 3.1 Create embedding
-                # 3.2 Create Instance of conversation chain
                 st.session_state.conversation = get_conversationChain(vector_store)
-
-
-    # st.write(raw_text)
-
-
+                st.success("Processing completed!")
 
 
 if __name__ == '__main__':
